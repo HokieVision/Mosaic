@@ -62,7 +62,6 @@ using namespace cv;
 using namespace cv::detail;
 
 // Default command line args
-// vector<string> img_names;
 bool preview = false;
 bool try_gpu = false;
 double work_megapix = 0.08;
@@ -76,22 +75,27 @@ bool do_wave_correct = true;
 WaveCorrectKind wave_correct = detail::WAVE_CORRECT_HORIZ;
 bool save_graph = false;
 std::string save_graph_to;
-string warp_type = "cylindrical";
+string warp_type = "plane";
 int expos_comp_type = ExposureCompensator::GAIN;
 float match_conf = 0.3f;
 string seam_find_type = "dp_colorgrad";
 int blend_type = Blender::MULTI_BAND;
 float blend_strength = 5;
-string result_name = "result.jpg";
+string result_name = "temp.jpg";
 
 
 bool stitch(vector<Mat> orig_images) {
 // Check if have enough images
+try {
     int num_images = static_cast<int>(orig_images.size());
-    if (num_images < 2)
+    if (num_images < 1)
     {
-        LOGLN("Need more images");
-        return -1;
+        return 1;
+    }
+
+    if (num_images < 2) {
+        imwrite(result_name, orig_images[0]);
+	return 1;
     }
 
     double work_scale = 1, seam_scale = 1, compose_scale = 1;
@@ -506,7 +510,8 @@ bool stitch(vector<Mat> orig_images) {
         blender->feed(img_warped_s, mask_warped, corners[img_idx]);
     }
 
-    Mat result, result_mask;
+    Mat result;
+    Mat result_mask;
     blender->blend(result, result_mask);
 
     LOGLN("Compositing, time: " << ((getTickCount() - t) / getTickFrequency()) << " sec");
@@ -515,16 +520,61 @@ bool stitch(vector<Mat> orig_images) {
 
     LOGLN("Finished, total time: " << ((getTickCount() - app_start_time) / getTickFrequency()) << " sec");
     return 1;
+}catch (cv::Exception &e) {
+	const char* err_msg = e.what();
+	cout << err_msg << endl;
+	return -1;
+}
 }
 
 int main(int argc, char const *argv[])
 {
-    vector<Mat> images;
-    images.push_back(imread("test0.png", CV_LOAD_IMAGE_COLOR));
-    images.push_back(imread("test1.png", CV_LOAD_IMAGE_COLOR));
-    images.push_back(imread("test2.png", CV_LOAD_IMAGE_COLOR));
-    images.push_back(imread("test3.png", CV_LOAD_IMAGE_COLOR));
-    images.push_back(imread("test4.png", CV_LOAD_IMAGE_COLOR));
+    int64 app_start_time = getTickCount();
+     //vector<Mat> images;
+     //images.push_back(imread("images/test0.png", CV_LOAD_IMAGE_COLOR));
+     //images.push_back(imread("images/test1.png", CV_LOAD_IMAGE_COLOR));
+     //images.push_back(imread("images/test2.png", CV_LOAD_IMAGE_COLOR));
+     //images.push_back(imread("images/test3.png", CV_LOAD_IMAGE_COLOR));
+     //images.push_back(imread("images/test4.png", CV_LOAD_IMAGE_COLOR));
 
-    return stitch(images);
-}
+    namedWindow("stream",WINDOW_OPENGL);
+
+    VideoCapture cap;
+
+    if(!cap.open("building_aerial.mp4")) {
+        cout << "Failed to open video." << endl;
+        return -1;
+    }
+
+    vector<Mat> images;
+    int curr_frame = 0;
+    double frame_count = cap.get(CV_CAP_PROP_FRAME_COUNT);
+    double fps = cap.get(CV_CAP_PROP_FPS);
+
+    // Extract each video frame:
+    while (1)
+    {
+	if (curr_frame == (int) frame_count) {
+		imwrite("result.jpg",  (imread("temp.jpg", CV_LOAD_IMAGE_COLOR)));
+		break;
+	}
+
+         Mat frame;
+	 cap >> frame;
+
+          if( frame.empty() ) break; // end of video stream
+
+	  if (curr_frame % 100 == 0) {
+		images.push_back(frame);
+		stitch(images);
+		images.clear();
+		images.push_back(imread("temp.jpg", CV_LOAD_IMAGE_COLOR));
+	  }
+          frame.release();         
+        curr_frame++;
+    }
+
+	cout << "Finished, total time: " << ((getTickCount() - app_start_time) / getTickFrequency()) << " sec" << endl;
+
+    return 1;
+} 
