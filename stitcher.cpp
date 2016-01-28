@@ -1,4 +1,4 @@
-/*M///////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////
 //
 //  IMPORTANT: READ BEFORE DOWNLOADING, COPYING, INSTALLING OR USING.
 //
@@ -79,23 +79,24 @@ string warp_type = "plane";
 int expos_comp_type = ExposureCompensator::GAIN;
 float match_conf = 0.3f;
 string seam_find_type = "dp_colorgrad";
-int blend_type = Blender::MULTI_BAND;
+int blend_type = Blender::FEATHER;
 float blend_strength = 5;
 string result_name = "temp.jpg";
 
 
-bool stitch(vector<Mat> orig_images) {
+bool stitch(vector<Mat> orig_images, int num) {
 // Check if have enough images
 	try {
 		int num_images = static_cast<int>(orig_images.size());
 		if (num_images < 1)
 		{
-			return 1;
+			cout << "Not enough images to stitch." << endl;
+			return false;
 		}
 
 		if (num_images < 2) {
 			imwrite(result_name, orig_images[0]);
-			return 1;
+			return true;
 		}
 
 		double work_scale = 1, seam_scale = 1, compose_scale = 1;
@@ -123,7 +124,7 @@ bool stitch(vector<Mat> orig_images) {
 		else
 		{
 			cout << "Unknown 2D features type: '" << features_type << "'.\n";
-			return -1;
+			return false;
 		}
 
 		Mat full_img, img;
@@ -140,7 +141,8 @@ bool stitch(vector<Mat> orig_images) {
 			if (full_img.empty())
 			{
 				// LOGLN("Can't open image " << img_names[i]);
-				return -1;
+				cout << "Cannot open images." << endl;
+				return false;
 			}
 			if (work_megapix < 0)
 			{
@@ -212,6 +214,7 @@ bool stitch(vector<Mat> orig_images) {
 			img_subset.push_back(images[indices[i]]);
 			full_img_sizes_subset.push_back(full_img_sizes[indices[i]]);
 		}
+		cout << img_subset.size() << " images left" << endl;
 
 		images = img_subset;
 		full_img_sizes = full_img_sizes_subset;
@@ -221,7 +224,8 @@ bool stitch(vector<Mat> orig_images) {
 		if (num_images < 2)
 		{
 			LOGLN("Need more images");
-			return -1;
+			cout << "Need more images." << endl;
+			return false;
 		}
 
 		HomographyBasedEstimator estimator;
@@ -242,7 +246,7 @@ bool stitch(vector<Mat> orig_images) {
 		else
 		{
 			cout << "Unknown bundle adjustment cost function: '" << ba_cost_func << "'.\n";
-			return -1;
+			return false;
 		}
 		adjuster->setConfThresh(conf_thresh);
 		Mat_<uchar> refine_mask = Mat::zeros(3, 3, CV_8U);
@@ -331,7 +335,7 @@ bool stitch(vector<Mat> orig_images) {
 		if (warper_creator.empty())
 		{
 			cout << "Can't create the following warper '" << warp_type << "'\n";
-			return 1;
+			return false;
 		}
 
 		Ptr<RotationWarper> warper = warper_creator->create(static_cast<float>(warped_image_scale * seam_work_aspect));
@@ -389,7 +393,7 @@ bool stitch(vector<Mat> orig_images) {
 		if (seam_finder.empty())
 		{
 			cout << "Can't create the following seam finder '" << seam_find_type << "'\n";
-			return 1;
+			return false;
 		}
 
 		seam_finder->find(images_warped_f, corners, masks_warped);
@@ -411,12 +415,16 @@ bool stitch(vector<Mat> orig_images) {
 		//double compose_seam_aspect = 1;
 		double compose_work_aspect = 1;
 
+		if (num == 480)
+			cout << endl;
+
 		for (int img_idx = 0; img_idx < num_images; ++img_idx)
 		{
 			LOGLN("Compositing image #" << indices[img_idx] + 1);
 
 			// Read image and resize it if necessary
 			full_img = untouched_images[img_idx];
+			cout << full_img.size() << endl;
 			if (!is_compose_scale_set)
 			{
 				if (compose_megapix > 0)
@@ -441,6 +449,7 @@ bool stitch(vector<Mat> orig_images) {
 
 					// Update corner and size
 					Size sz = full_img_sizes[i];
+
 					if (std::abs(compose_scale - 1) > 1e-1)
 					{
 						sz.width = cvRound(full_img_sizes[i].width * compose_scale);
@@ -453,6 +462,7 @@ bool stitch(vector<Mat> orig_images) {
 					corners[i] = roi.tl();
 					sizes[i] = roi.size();
 				}
+				cout << "made it here" << endl;
 			}
 			if (abs(compose_scale - 1) > 1e-1)
 				resize(full_img, img, Size(), compose_scale, compose_scale);
@@ -460,6 +470,8 @@ bool stitch(vector<Mat> orig_images) {
 				img = full_img;
 			full_img.release();
 			Size img_size = img.size();
+
+			cout << img_size << "img_size" << endl;
 
 			Mat K;
 			cameras[img_idx].K().convertTo(K, CV_32F);
@@ -472,8 +484,12 @@ bool stitch(vector<Mat> orig_images) {
 			mask.setTo(Scalar::all(255));
 			warper->warp(mask, K, cameras[img_idx].R, INTER_NEAREST, BORDER_CONSTANT, mask_warped);
 
+			cout << "warped" << endl;
+
 			// Compensate exposure
 			compensator->apply(img_idx, corners[img_idx], img_warped, mask_warped);
+
+			cout << "compenstated" << endl;
 
 			img_warped.convertTo(img_warped_s, CV_16S);
 			img_warped.release();
@@ -508,6 +524,8 @@ bool stitch(vector<Mat> orig_images) {
 
 			// Blend the current image
 			blender->feed(img_warped_s, mask_warped, corners[img_idx]);
+
+			cout << "blended" << endl;
 		}
 
 		Mat result;
@@ -519,11 +537,12 @@ bool stitch(vector<Mat> orig_images) {
 		imwrite(result_name, result);
 
 		LOGLN("Finished, total time: " << ((getTickCount() - app_start_time) / getTickFrequency()) << " sec");
-		return 1;
+
+		return true;
 	} catch (cv::Exception &e) {
 		const char* err_msg = e.what();
-		cout << err_msg << endl;
-		return -1;
+		cout << "error: " << err_msg << endl;
+		return false;
 	}
 }
 
@@ -537,11 +556,15 @@ int main(int argc, char const *argv[])
 	//images.push_back(imread("images/test3.png", CV_LOAD_IMAGE_COLOR));
 	//images.push_back(imread("images/test4.png", CV_LOAD_IMAGE_COLOR));
 
+	if (argc != 3) {
+		cout << "Usage: 	Name of video file	Result name with extension." << endl;
+	}	
+
 	namedWindow("stream", WINDOW_OPENGL);
 
 	VideoCapture cap;
 
-	if (!cap.open("building_aerial.mp4")) {
+	if (!cap.open(argv[1])) {
 		cout << "Failed to open video." << endl;
 		return -1;
 	}
@@ -554,26 +577,35 @@ int main(int argc, char const *argv[])
 	// Extract each video frame:
 	while (1)
 	{
-		if (curr_frame == (int) frame_count) {
-			imwrite("result.jpg",  (imread("temp.jpg", CV_LOAD_IMAGE_COLOR)));
-			break;
-		}
-
 		Mat frame;
 		cap >> frame;
+		
+		if ( frame.empty()) {
+			cout << "frame empty" << endl;
+			imwrite(argv[2],  (imread("temp.jpg", CV_LOAD_IMAGE_COLOR)));
+			break; // end of video stream
+		}
 
-		if ( frame.empty() ) break; // end of video stream
-
-		if (curr_frame % 100 == 0) {
+		if ((curr_frame % 80 == 0) || (curr_frame == (int) frame_count - 1)) {
+			cout << curr_frame << " " << frame.size() << endl;
 			images.push_back(frame);
-			stitch(images);
+			bool success = stitch(images, curr_frame);
+
 			images.clear();
 			images.push_back(imread("temp.jpg", CV_LOAD_IMAGE_COLOR));
+			cout << success <<  " stitch done" << endl << endl;
 		}
+
 		frame.release();
 		curr_frame++;
+
+		if ( curr_frame == (int) frame_count) {
+			imwrite(argv[2],  (imread("temp.jpg", CV_LOAD_IMAGE_COLOR)));
+			break; // end of video stream
+		}
 	}
 
+	images.clear();
 	cout << "Finished, total time: " << ((getTickCount() - app_start_time) / getTickFrequency()) << " sec" << endl;
 
 	return 1;
