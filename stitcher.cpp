@@ -39,7 +39,7 @@
 // the use of this software, even if advised of the possibility of such damage.
 //
 //
-//M*/
+///
 
 #include <iostream>
 #include <fstream>
@@ -56,6 +56,8 @@
 #include "opencv2/stitching/detail/util.hpp"
 #include "opencv2/stitching/detail/warpers.hpp"
 #include "opencv2/stitching/warpers.hpp"
+#include "opencv2/stitching/stitcher.hpp"
+#include <future>
 
 using namespace std;
 using namespace cv;
@@ -64,8 +66,8 @@ using namespace cv::detail;
 // Default command line args
 bool preview = false;
 bool try_gpu = false;
-double work_megapix = 0.08;
-double seam_megapix = 0.08;
+double work_megapix = 0.12;
+double seam_megapix = 0.12;
 double compose_megapix = -1;
 float conf_thresh = 0.5f;
 string features_type = "surf";
@@ -84,7 +86,7 @@ float blend_strength = 5;
 string result_name = "temp.jpg";
 
 
-bool stitch(vector<Mat> orig_images, int num) {
+bool stitch(vector<Mat> orig_images) {
 // Check if have enough images
 	try {
 		int num_images = static_cast<int>(orig_images.size());
@@ -127,26 +129,27 @@ bool stitch(vector<Mat> orig_images, int num) {
 			return false;
 		}
 
-		Mat full_img, img;
+		vector<Mat> full_img(num_images);
+		vector<Mat> img(num_images);
 		vector<ImageFeatures> features(num_images);
 		vector<Mat> images(num_images);
 		vector<Size> full_img_sizes(num_images);
 		double seam_work_aspect = 1;
 
+		#pragma omp parallel for
 		for (int i = 0; i < num_images; ++i)
 		{
-			full_img = orig_images[i];
-			full_img_sizes[i] = full_img.size();
+			full_img[i] = orig_images[i];
+			full_img_sizes[i] = full_img[i].size();
 
-			if (full_img.empty())
+			if (full_img[i].empty())
 			{
 				// LOGLN("Can't open image " << img_names[i]);
 				cout << "Cannot open images." << endl;
-				return false;
 			}
 			if (work_megapix < 0)
 			{
-				img = full_img;
+				img[i] = full_img[i];
 				work_scale = 1;
 				is_work_scale_set = true;
 			}
@@ -154,29 +157,27 @@ bool stitch(vector<Mat> orig_images, int num) {
 			{
 				if (!is_work_scale_set)
 				{
-					work_scale = min(1.0, sqrt(work_megapix * 1e6 / full_img.size().area()));
+					work_scale = min(1.0, sqrt(work_megapix * 1e6 / full_img[i].size().area()));
 					is_work_scale_set = true;
 				}
-				resize(full_img, img, Size(), work_scale, work_scale);
+				resize(full_img[i], img[i], Size(), work_scale, work_scale);
 			}
 			if (!is_seam_scale_set)
 			{
-				seam_scale = min(1.0, sqrt(seam_megapix * 1e6 / full_img.size().area()));
+				seam_scale = min(1.0, sqrt(seam_megapix * 1e6 / full_img[i].size().area()));
 				seam_work_aspect = seam_scale / work_scale;
 				is_seam_scale_set = true;
 			}
 
-			(*finder)(img, features[i]);
+			(*finder)(img[i], features[i]);
 			features[i].img_idx = i;
 			LOGLN("Features in image #" << i + 1 << ": " << features[i].keypoints.size());
 
-			resize(full_img, img, Size(), seam_scale, seam_scale);
-			images[i] = img.clone();
+			resize(full_img[i], img[i], Size(), seam_scale, seam_scale);
+			images[i] = img[i].clone();
 		}
 
 		finder->collectGarbage();
-		full_img.release();
-		img.release();
 
 		LOGLN("Finding features, time: " << ((getTickCount() - t) / getTickFrequency()) << " sec");
 
@@ -339,6 +340,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 		}
 
 		Ptr<RotationWarper> warper = warper_creator->create(static_cast<float>(warped_image_scale * seam_work_aspect));
+		vector<Mat> images_warped_f(num_images);
 
 		for (int i = 0; i < num_images; ++i)
 		{
@@ -350,13 +352,13 @@ bool stitch(vector<Mat> orig_images, int num) {
 
 			corners[i] = warper->warp(images[i], K, cameras[i].R, INTER_LINEAR, BORDER_REFLECT, images_warped[i]);
 			sizes[i] = images_warped[i].size();
+			cout << "warp corners and sizes" << corners[i] << " " << sizes[i] << endl;
 
 			warper->warp(masks[i], K, cameras[i].R, INTER_NEAREST, BORDER_CONSTANT, masks_warped[i]);
+			images_warped[i].convertTo(images_warped_f[i], CV_32F);
 		}
 
-		vector<Mat> images_warped_f(num_images);
-		for (int i = 0; i < num_images; ++i)
-			images_warped[i].convertTo(images_warped_f[i], CV_32F);
+
 
 		LOGLN("Warping images, time: " << ((getTickCount() - t) / getTickFrequency()) << " sec");
 
@@ -415,20 +417,16 @@ bool stitch(vector<Mat> orig_images, int num) {
 		//double compose_seam_aspect = 1;
 		double compose_work_aspect = 1;
 
-		if (num == 480)
-			cout << endl;
-
+		//#pragma omp parallel for
 		for (int img_idx = 0; img_idx < num_images; ++img_idx)
 		{
 			LOGLN("Compositing image #" << indices[img_idx] + 1);
 
 			// Read image and resize it if necessary
-			full_img = untouched_images[img_idx];
-			cout << full_img.size() << endl;
 			if (!is_compose_scale_set)
 			{
 				if (compose_megapix > 0)
-					compose_scale = min(1.0, sqrt(compose_megapix * 1e6 / full_img.size().area()));
+					compose_scale = min(1.0, sqrt(compose_megapix * 1e6 / full_img[img_idx].size().area()));
 				is_compose_scale_set = true;
 
 				// Compute relative scales
@@ -442,6 +440,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 				// Update corners and sizes
 				for (int i = 0; i < num_images; ++i)
 				{
+					cout << "prev corners and sizes" << corners[i] << " " << sizes[i] << endl;
 					// Update intrinsics
 					cameras[i].focal *= compose_work_aspect;
 					cameras[i].ppx *= compose_work_aspect;
@@ -461,15 +460,15 @@ bool stitch(vector<Mat> orig_images, int num) {
 					Rect roi = warper->warpRoi(sz, K, cameras[i].R);
 					corners[i] = roi.tl();
 					sizes[i] = roi.size();
+					cout << "post corners and sizes" << corners[i] << " " << sizes[i] << endl;
 				}
-				cout << "made it here" << endl;
 			}
 			if (abs(compose_scale - 1) > 1e-1)
-				resize(full_img, img, Size(), compose_scale, compose_scale);
+				resize(full_img[img_idx], img[img_idx], Size(), compose_scale, compose_scale);
 			else
-				img = full_img;
-			full_img.release();
-			Size img_size = img.size();
+				img[img_idx] = full_img[img_idx];
+			full_img[img_idx].release();
+			Size img_size = img[img_idx].size();
 
 			cout << img_size << "img_size" << endl;
 
@@ -477,23 +476,19 @@ bool stitch(vector<Mat> orig_images, int num) {
 			cameras[img_idx].K().convertTo(K, CV_32F);
 
 			// Warp the current image
-			warper->warp(img, K, cameras[img_idx].R, INTER_LINEAR, BORDER_REFLECT, img_warped);
+			warper->warp(img[img_idx], K, cameras[img_idx].R, INTER_LINEAR, BORDER_REFLECT, img_warped);
 
 			// Warp the current image mask
 			mask.create(img_size, CV_8U);
 			mask.setTo(Scalar::all(255));
 			warper->warp(mask, K, cameras[img_idx].R, INTER_NEAREST, BORDER_CONSTANT, mask_warped);
 
-			cout << "warped" << endl;
-
 			// Compensate exposure
 			compensator->apply(img_idx, corners[img_idx], img_warped, mask_warped);
 
-			cout << "compenstated" << endl;
-
 			img_warped.convertTo(img_warped_s, CV_16S);
 			img_warped.release();
-			img.release();
+			img[img_idx].release();
 			mask.release();
 
 			dilate(masks_warped[img_idx], dilated_mask, Mat());
@@ -505,8 +500,9 @@ bool stitch(vector<Mat> orig_images, int num) {
 				blender = Blender::createDefault(blend_type, try_gpu);
 				Size dst_sz = resultRoi(corners, sizes).size();
 				float blend_width = sqrt(static_cast<float>(dst_sz.area())) * blend_strength / 100.f;
-				if (blend_width < 1.f)
+				if (blend_width < 1.f) {
 					blender = Blender::createDefault(Blender::NO, try_gpu);
+				}
 				else if (blend_type == Blender::MULTI_BAND)
 				{
 					MultiBandBlender* mb = dynamic_cast<MultiBandBlender*>(static_cast<Blender*>(blender));
@@ -519,7 +515,9 @@ bool stitch(vector<Mat> orig_images, int num) {
 					fb->setSharpness(1.f / blend_width);
 					LOGLN("Feather blender, sharpness: " << fb->sharpness());
 				}
+				cout << "about to prepare" << endl;
 				blender->prepare(corners, sizes);
+				cout << "prepared" << endl;
 			}
 
 			// Blend the current image
@@ -534,11 +532,17 @@ bool stitch(vector<Mat> orig_images, int num) {
 
 		LOGLN("Compositing, time: " << ((getTickCount() - t) / getTickFrequency()) << " sec");
 
-		imwrite(result_name, result);
+		cout << "size " << result.size() << " " << result.size[0] << " " << result.cols << endl;
 
-		LOGLN("Finished, total time: " << ((getTickCount() - app_start_time) / getTickFrequency()) << " sec");
-
-		return true;
+		if (result.rows > (int) 1 || result.cols > (int) 1) {
+			imwrite(result_name, result);
+			LOGLN("Finished, total time: " << ((getTickCount() - app_start_time) / getTickFrequency()) << " sec");
+			return true;
+		}
+		else {
+			std::cout << "empty image" << std::endl;
+			return false;
+		}
 	} catch (cv::Exception &e) {
 		const char* err_msg = e.what();
 		cout << "error: " << err_msg << endl;
@@ -546,21 +550,65 @@ bool stitch(vector<Mat> orig_images, int num) {
 	}
 }
 
+bool stitch2(vector<Mat> imgs) {
+	Stitcher stitcher = Stitcher::createDefault(false);
+	stitcher.setWarper(new cv::PlaneWarper());
+	stitcher.setFeaturesFinder(new detail::SurfFeaturesFinder(300,3,4,3,4));
+	stitcher.setRegistrationResol(0.08);
+	stitcher.setSeamEstimationResol(0.08);
+	stitcher.setCompositingResol(-1);
+	stitcher.setPanoConfidenceThresh(1);
+	stitcher.setWaveCorrection(true);
+	stitcher.setWaveCorrectKind(detail::WAVE_CORRECT_HORIZ);
+	stitcher.setFeaturesMatcher(new detail::BestOf2NearestMatcher(false, 0.3));
+	stitcher.setBundleAdjuster(new detail::BundleAdjusterRay());
+	Stitcher::Status status = Stitcher::ERR_NEED_MORE_IMGS;
+
+	try {
+		if (imgs.size() == 0) return true;
+		if (imgs.size() == 1) {
+			imwrite(result_name, imgs[0]);
+			return true;
+		}
+		Mat pano;
+		status = stitcher.stitch(imgs, pano);
+		//imshow("pano", pano);
+		//waitKey(0);
+		imwrite(result_name, pano);
+		return status;
+	}
+	catch(cv::Exception &e) {
+		const char* err_msg = e.what();
+		cout << "error: " << err_msg << endl;
+		return false;
+	}
+}
+
+void displayVideo(VideoCapture cap) {
+	cout << "here" << endl;
+	while (1)
+	{
+		Mat frame;
+		cap >> frame;
+		imshow("stream", frame);
+		waitKey(1);
+		
+		if ( frame.empty()) {
+			cout << "frame empty" << endl;
+			break; // end of video stream
+		}
+	}
+}
+
 int main(int argc, char const *argv[])
 {
 	int64 app_start_time = getTickCount();
-	//vector<Mat> images;
-	//images.push_back(imread("images/test0.png", CV_LOAD_IMAGE_COLOR));
-	//images.push_back(imread("images/test1.png", CV_LOAD_IMAGE_COLOR));
-	//images.push_back(imread("images/test2.png", CV_LOAD_IMAGE_COLOR));
-	//images.push_back(imread("images/test3.png", CV_LOAD_IMAGE_COLOR));
-	//images.push_back(imread("images/test4.png", CV_LOAD_IMAGE_COLOR));
 
-	if (argc != 3) {
-		cout << "Usage: 	Name of video file	Result name with extension." << endl;
+	if (argc != 4) {
+		cout << "Usage: 	Name of video file	Result name with extension	Number of frames between stitches." << endl;
 	}	
 
-	namedWindow("stream", WINDOW_OPENGL);
+	namedWindow("stream", WINDOW_NORMAL);
 
 	VideoCapture cap;
 
@@ -568,6 +616,12 @@ int main(int argc, char const *argv[])
 		cout << "Failed to open video." << endl;
 		return -1;
 	}
+
+	std::future<void> fut = std::async(displayVideo, cap);
+
+	int frameSkip = atoi(argv[3]);
+
+	cout << frameSkip << endl;
 
 	vector<Mat> images;
 	int curr_frame = 0;
@@ -586,14 +640,22 @@ int main(int argc, char const *argv[])
 			break; // end of video stream
 		}
 
-		if ((curr_frame % 80 == 0) || (curr_frame == (int) frame_count - 1)) {
+		if ((curr_frame % frameSkip == 0)/* || (curr_frame == (int) frame_count - 1)*/) {
 			cout << curr_frame << " " << frame.size() << endl;
 			images.push_back(frame);
-			bool success = stitch(images, curr_frame);
+			bool success = stitch(images);
+			// bool success = stitch2(images);
 
 			images.clear();
-			images.push_back(imread("temp.jpg", CV_LOAD_IMAGE_COLOR));
+			Mat temp = imread("temp.jpg", CV_LOAD_IMAGE_COLOR);
+
+			if (!temp.empty())
+				images.push_back(temp);
+			else
+				images.push_back(frame);
 			cout << success <<  " stitch done" << endl << endl;
+			imshow("stream", temp);
+			waitKey(1000);
 		}
 
 		frame.release();
@@ -607,6 +669,6 @@ int main(int argc, char const *argv[])
 
 	images.clear();
 	cout << "Finished, total time: " << ((getTickCount() - app_start_time) / getTickFrequency()) << " sec" << endl;
-
+	destroyAllWindows();
 	return 1;
 }
