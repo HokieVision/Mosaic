@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Drone Streaming</string>
+    <string name="action_settings">Settings</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="capture">Capture</string>
+    <string name="record">Record</string>
+    <string name="stop_recording">Stop recording</string>
+</resources>

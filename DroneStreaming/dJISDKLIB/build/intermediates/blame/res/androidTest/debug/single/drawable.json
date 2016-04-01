@@ -1,0 +1,22 @@
+[
+    {
+        "merged": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\res\\merged\\androidTest\\debug\\drawable\\radio_unchecked.png",
+        "source": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\bundles\\debug\\res\\drawable\\radio_unchecked.png"
+    },
+    {
+        "merged": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\res\\merged\\androidTest\\debug\\drawable\\radio_checked.png",
+        "source": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\bundles\\debug\\res\\drawable\\radio_checked.png"
+    },
+    {
+        "merged": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\res\\merged\\androidTest\\debug\\drawable\\btn_radio_selector.xml",
+        "source": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\bundles\\debug\\res\\drawable\\btn_radio_selector.xml"
+    },
+    {
+        "merged": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\res\\merged\\androidTest\\debug\\drawable\\btn_lock_selector.xml",
+        "source": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\bundles\\debug\\res\\drawable\\btn_lock_selector.xml"
+    },
+    {
+        "merged": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\res\\merged\\androidTest\\debug\\drawable\\btn_zoom_selector.xml",
+        "source": "C:\\Users\\James\\Documents\\GitHub\\Mosaic\\DroneStreaming\\dJISDKLIB\\build\\intermediates\\bundles\\debug\\res\\drawable\\btn_zoom_selector.xml"
+    }
+]
