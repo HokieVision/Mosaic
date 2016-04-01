@@ -232,6 +232,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 		vector<CameraParams> cameras;
 		estimator(features, pairwise_matches, cameras);
 
+		// Same for each iteration?
 		for (size_t i = 0; i < cameras.size(); ++i)
 		{
 			Mat R;
@@ -249,6 +250,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 			return false;
 		}
 		adjuster->setConfThresh(conf_thresh);
+		// remove blur?
 		Mat_<uchar> refine_mask = Mat::zeros(3, 3, CV_8U);
 		if (ba_refine_mask[0] == 'x') refine_mask(0, 0) = 1;
 		if (ba_refine_mask[1] == 'x') refine_mask(0, 1) = 1;
@@ -274,6 +276,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 		else
 			warped_image_scale = static_cast<float>(focals[focals.size() / 2 - 1] + focals[focals.size() / 2]) * 0.5f;
 
+		// disable?
 		if (do_wave_correct)
 		{
 			vector<Mat> rmats;
@@ -295,7 +298,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 		vector<Size> sizes(num_images);
 		vector<Mat> masks(num_images);
 
-		// Preapre images masks
+		// Prepare images masks
 		for (int i = 0; i < num_images; ++i)
 		{
 			masks[i].create(images[i].size(), CV_8U);
@@ -415,9 +418,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 		//double compose_seam_aspect = 1;
 		double compose_work_aspect = 1;
 
-		if (num == 480)
-			cout << endl;
-
+		// warp only 1 image?
 		for (int img_idx = 0; img_idx < num_images; ++img_idx)
 		{
 			LOGLN("Compositing image #" << indices[img_idx] + 1);
@@ -486,7 +487,7 @@ bool stitch(vector<Mat> orig_images, int num) {
 
 			cout << "warped" << endl;
 
-			// Compensate exposure
+			// Compensate exposure, maybe remove?
 			compensator->apply(img_idx, corners[img_idx], img_warped, mask_warped);
 
 			cout << "compenstated" << endl;
